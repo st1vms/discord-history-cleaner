@@ -75,7 +75,16 @@ def get_channel_message_ids(
     message_id_start: str = None,
     message_id_stop: str = None,
 ) -> list[str] | None:
-    """Returns a list of all the message IDs found in a particular channel id"""
+    """Perform authenticated GET requests to /messages/ endpoint in order
+    Returns a list of all the message IDs found in a particular `channel_id`,
+    filtering by the provided `author_id`.
+
+    `message_id_start` -> The first author message to delete and look for other messages from;
+    leave None to start searching from the very first channel message.
+
+    `message_id_stop` -> The last message to look for, can be a message wrote by a different author;
+    leave None to stop looking for messages until the last channel message.
+    """
 
     headers = BASE_HEADERS.copy()
     headers["Cookie"] = cookie.encode("latin-1", errors="ignore").decode("latin-1")
@@ -122,8 +131,8 @@ def get_channel_message_ids(
 def perform_channel_message_deletion(
     cookie: str, auth_header: str, channel_id: str, message_id: str
 ) -> None:
-    """Perform an HTTP DELETE request to delete a message in channel,
-    using `channel_id` and `message_id`"""
+    """Perform an authenticated HTTP DELETE request to delete a message in public/private channel,
+    requires a `channel_id` and a `message_id`"""
 
     url = f"{get_channel_messages_endpoint(channel_id)}/{message_id}"
 
