@@ -1,5 +1,7 @@
-"""
-Discord History Cleaner v0.1.1
+VERSION_NUM = "0.1.3"
+
+f"""
+Discord History Cleaner v{VERSION_NUM}
 
 MIT License
 
@@ -25,7 +27,6 @@ SOFTWARE.
 """
 
 from time import sleep
-from datetime import datetime
 from requests import get as http_get
 from requests import delete as http_delete
 
@@ -54,22 +55,45 @@ BASE_URL = "https://discord.com/api/v9"
 
 
 def get_guild_search_endpoint(guild_id: str, channel_id: str, author_id: str) -> str:
-    """Returns the Discord's guild search endpoint (full URL)"""
+    """
+    Constructs the full Discord API URL to search messages by a specific author in a guild channel.
+
+    Args:
+        guild_id (str): The ID of the guild (server).
+        channel_id (str): The ID of the channel within the guild.
+        author_id (str): The ID of the author whose messages are being searched.
+
+    Returns:
+        str: Full URL for the guild message search endpoint.
+    """
     return f"{BASE_URL}/guilds/{guild_id}/messages/search?author_id={author_id}&channel_id={channel_id}"
 
 
 def get_channel_search_endpoint(channel_id: str, author_id: str) -> str:
-    """Returns the Discord's channel search endpoint (full URL)"""
+    """
+    Constructs the full Discord API URL to search messages by a specific author in a direct message (DM) channel.
+
+    Args:
+        channel_id (str): The ID of the DM channel.
+        author_id (str): The ID of the author whose messages are being searched.
+
+    Returns:
+        str: Full URL for the channel message search endpoint.
+    """
     return f"{BASE_URL}/channels/{channel_id}/messages/search?author_id={author_id}"
 
 
 def get_delete_message_endpoint(channel_id: str) -> str:
-    """Returns the Discord's channel messages endpoint for deletion (full URL)"""
+    """
+    Constructs the full Discord API URL to access or delete a specific message in a channel.
+
+    Args:
+        channel_id (str): The ID of the channel containing the message.
+
+    Returns:
+        str: Full URL for the message deletion endpoint.
+    """
     return f"{BASE_URL}/channels/{channel_id}/messages"
-
-
-MESSAGE_ID_START_TIMESTAMP = 0
-MESSAGE_ID_STOP_REACHED = False
 
 
 def __do_search_messages(
@@ -80,10 +104,13 @@ def __do_search_messages(
     offset: int = 0,
 ) -> tuple[list[str], int]:
 
-    global MESSAGE_ID_START_TIMESTAMP
-    global MESSAGE_ID_STOP_REACHED
-
     url = f"{url}&offset={offset}&include_nsfw=true"
+
+    if message_id_start is not None:
+        url += f"&max_id={message_id_start}"
+
+    if message_id_stop is not None:
+        url += f"&min_id={message_id_stop}"
 
     res = http_get(url, headers=headers, timeout=10)
     if res.status_code != 200:
@@ -91,44 +118,14 @@ def __do_search_messages(
 
     data = res.json()
 
-    message_ids = []
-
     total_results = data["total_results"]
     if total_results <= 0:
         return ([], 0)
 
-    for message in data["messages"]:
-        for item in message:
-            # Check if we can start saving ids
-            if (
-                message_id_start is not None
-                and MESSAGE_ID_START_TIMESTAMP == 0
-                and item["id"] == message_id_start
-            ):
-                # Reached start message id
-                MESSAGE_ID_START_TIMESTAMP = datetime.fromisoformat(
-                    item["timestamp"]
-                ).timestamp()
-
-            if (
-                message_id_stop is not None
-                and not MESSAGE_ID_STOP_REACHED
-                and item["id"] == message_id_stop
-            ):
-                MESSAGE_ID_STOP_REACHED = True
-                message_ids.append(item["id"])
-
-            if MESSAGE_ID_STOP_REACHED:
-                # Reached stop message id
-                return (message_ids, total_results)
-
-            tmp = datetime.fromisoformat(item["timestamp"]).timestamp()
-            if message_id_start is None or (
-                MESSAGE_ID_START_TIMESTAMP != 0 and tmp <= MESSAGE_ID_START_TIMESTAMP
-            ):
-                message_ids.append(item["id"])
-
-    return (message_ids, total_results)
+    return (
+        [item["id"] for message in data["messages"] for item in message],
+        total_results,
+    )
 
 
 def search_author_message_ids(
@@ -140,16 +137,22 @@ def search_author_message_ids(
     message_id_start: str = None,
     message_id_stop: str = None,
     is_dm: bool = True,
-) -> list[str] | None:
-    """Perform authenticated GET requests to /messages/ endpoint in order
-    Returns a list of all the message IDs found in a particular `channel_id`,
-    filtering by the provided `author_id`.
+) -> list[str]:
+    """
+    Searches for all messages authored by a specific user in a given Discord channel (guild or DM).
 
-    `message_id_start` -> The first message wrote by `author_id` to delete and look for other messages from;
-    leave None to start searching from the very first message.
+    Args:
+        cookie (str): Discord session cookie.
+        auth_header (str): Authorization token for Discord.
+        author_id (str): ID of the author whose messages are to be found.
+        channel_id (str): ID of the target channel.
+        guild_id (str, optional): ID of the guild, required for non-DM channels. (Defaults to None).
+        message_id_start (str, optional): ID of the first message to begin search from, this message won't be deleted. (Defaults to None).
+        message_id_stop (str, optional): ID of the last message to stop at, this message won't be deleted. (Defaults to None).
+        is_dm (bool, optional): Flag indicating if this is a DM channel. (Defaults to True).
 
-    `message_id_stop` -> The last message to look for, also need to be a message wrote by `author_id`;
-    leave None to stop looking for messages until the last message.
+    Returns:
+        list[str]: List of message IDs matching the author in the channel.
     """
 
     if is_dm:
@@ -185,10 +188,20 @@ def search_author_message_ids(
 
 
 def perform_channel_message_deletion(
-    cookie: str, auth_header: str, channel_id: str, message_id: str, is_dm: bool = False
+    cookie: str, auth_header: str, channel_id: str, message_id: str
 ) -> None:
-    """Perform an authenticated HTTP DELETE request to delete a message in public/private channel,
-    requires a `channel_id` and a `message_id`"""
+    """
+    Deletes a specific message from a Discord channel (DM or guild).
+
+    Args:
+        cookie (str): Discord session cookie.
+        auth_header (str): Authorization token for Discord.
+        channel_id (str): ID of the channel containing the message.
+        message_id (str): ID of the message to be deleted.
+
+    Raises:
+        RuntimeError: If the message deletion fails.
+    """
 
     url = f"{get_delete_message_endpoint(channel_id)}/{message_id}"
 
@@ -201,9 +214,11 @@ def perform_channel_message_deletion(
     if res.status_code != 204:
         try:
             count = float(res.json()["retry_after"]) + DELETION_TIME_RATE_SECONDS
-            print(f"\nThe deletion rate limit was hit, retrying after {count} seconds...")
+            print(
+                f"\nThe deletion rate limit was hit, retrying after {count} seconds..."
+            )
             sleep(count)
-            
+
             http_delete(url, headers=headers, timeout=10)
         except Exception as e:
             raise RuntimeError(
@@ -219,69 +234,53 @@ def __ask_input(prompt: str, error_prompt: str = None) -> str | None:
 
 
 def _main() -> None:
+    print(f"\nDiscord History Cleaner v{VERSION_NUM}")
+    print(
+        "\nThis tool deletes your own messages from a specific Discord channel (guild or DM).\n"
+    )
 
     cookie = __ask_input(
-        prompt="\nInsert your Discord cookie\n>>",
-        error_prompt="\nThis script needs a Discord Cookie in order to delete messages.",
+        prompt="\nEnter your Discord Cookie\n>>",
+        error_prompt="\nThis script requires a Discord Cookie to delete your messages.",
     )
     if not cookie:
         return
 
     auth_header = __ask_input(
-        prompt='\nInsert your Discord "Authentication Header" value\n>>',
-        error_prompt="\nThis script needs also a Discord Authentication token.",
+        prompt="\nEnter your Discord Authorization Token\n>>",
+        error_prompt="\nThis script requires a Discord Authentication token to delete your messages.",
     )
     if not auth_header:
         return
 
     author_id = __ask_input(
-        prompt="\nInsert your Discord User ID\n>>",
-        error_prompt="\nThis script needs your Discord User ID to delete your messages.",
+        prompt="\nEnter your Discord User ID\n>>",
+        error_prompt="\nThis script requires your Discord User ID to delete your messages.",
     )
     if not author_id:
         return
 
-    is_dm = input("\nIs this a DM's Channel ID? (N/y)\n>>").lower().startswith("y")
+    channel_id = __ask_input(
+        prompt="\nEnter the Discord Channel ID to delete messages from\n>>",
+        error_prompt="\nThis script requires a Discord Channel ID.",
+    )
+    if not channel_id:
+        return
 
-    guild_id = None
-    if is_dm:
-        channel_id = __ask_input(
-            prompt="\nInsert the Discord DM Channel ID to delete messages from\n>>",
-            error_prompt="\nThis script needs a DM Channel ID.",
-        )
-        if not channel_id:
-            return
-    else:
-        guild_id = __ask_input(
-            prompt="\nInsert the Discord Guild ID to delete messages from\n>>",
-            error_prompt="\nThis script needs a Guild ID.",
-        )
-        if not guild_id:
-            return
-
-        channel_id = __ask_input(
-            prompt="\nInsert the Guild's Channel ID to delete messages from\n>>",
-            error_prompt="\nThis script needs a Guild's Channel ID.",
-        )
-        if not channel_id:
-            return
+    guild_id = __ask_input(
+        prompt="\n(Optional) Enter the Guild ID if this is a guild channel (leave blank for DMs)\n>>",
+    )
+    is_dm = not bool(guild_id)
 
     message_id_start = __ask_input(
-        prompt=f"\n(Optional) Insert the starting Message ID when searching {'DM Channel' if is_dm else 'Guild'} messages"
-        + "\nThis must be the ID of a message that you wrote."
-        + "\n(Leave blank to start searching from the most recent message)\n>>"
+        prompt=f"\n(Optional) Enter Start Message ID, this message won't be deleted."
+        + "\n(Leave blank to start searching from earliest message)\n>>"
     )
-    if not message_id_start:
-        message_id_start = None
 
     message_id_stop = __ask_input(
-        prompt="\n(Optional) Insert the stop Message ID"
-        + f"\nIt's the last message to look for when searching {'DM Channel' if is_dm else 'Guild'} messages."
-        + "\nThis also must be the ID of a message that you wrote."
-        + f"\n(Leave blank to stop searching when reaching the last {'DM Channel' if is_dm else 'Guild'} message)\n>>"
+        prompt="\n(Optional) Enter Stop Message ID, this message won't be deleted."
+        + f"\n(Leave blank to scan up to latest message)\n>>"
     )
-    if not message_id_stop:
-        message_id_stop = None
 
     message_ids = search_author_message_ids(
         cookie,
@@ -295,12 +294,12 @@ def _main() -> None:
     )
     if not message_ids:
         print(
-            f"\nNo messages found in {'DM Channel' if is_dm else 'Guild'} {channel_id if is_dm else guild_id}"
+            f"\nNo messages found in {'DM Channel' if is_dm else 'Guild Channel'} {channel_id}"
         )
         return
 
     print(
-        f"\nFound {len(message_ids)} messages in {'DM Channel' if is_dm else 'Guild'} ({channel_id if is_dm else guild_id})\n"
+        f"\nFound {len(message_ids)} messages in {'DM Channel' if is_dm else 'Guild Channel'} ({channel_id})\n"
     )
 
     choice = (
@@ -317,7 +316,7 @@ def _main() -> None:
         print(f"\nDeleting message ({i+1}/{len(message_ids)}):({message_id})")
         try:
             perform_channel_message_deletion(
-                cookie, auth_header, channel_id, message_id, is_dm=is_dm
+                cookie, auth_header, channel_id, message_id
             )
         except RuntimeError as e:
             print(f"{e}")
