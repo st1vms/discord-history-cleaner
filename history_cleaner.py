@@ -1,7 +1,7 @@
 VERSION_NUM = "0.1.3"
 
-f"""
-Discord History Cleaner v{VERSION_NUM}
+"""
+Discord History Cleaner v0.1.3
 
 MIT License
 
